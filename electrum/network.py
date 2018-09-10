@@ -782,6 +782,7 @@ class Network(PrintError):
                 async with self.main_taskgroup as group:
                     await group.spawn(self._maintain_sessions())
                     [await group.spawn(job) for job in jobs]
+                    await group.spawn(self.channel_db.ca_verifier.main())
             except Exception as e:
                 traceback.print_exc(file=sys.stderr)
                 raise e
