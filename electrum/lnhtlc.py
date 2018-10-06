@@ -12,14 +12,14 @@ from .crypto import sha256
 from . import ecc
 from .lnutil import Outpoint, ChannelConfig, LocalState, RemoteState, Keypair, OnlyPubkeyKeypair, ChannelConstraints, RevocationStore, EncumberedTransaction
 from .lnutil import get_per_commitment_secret_from_seed
-from .lnutil import make_commitment_output_to_remote_address
+from .lnutil import make_commitment_output_to_remote_address, make_commitment_output_to_local_witness_script
 from .lnutil import secret_to_pubkey, derive_privkey, derive_pubkey, derive_blinded_pubkey
 from .lnutil import sign_and_get_sig_string
 from .lnutil import make_htlc_tx_with_open_channel, make_commitment, make_received_htlc, make_offered_htlc
 from .lnutil import HTLC_TIMEOUT_WEIGHT, HTLC_SUCCESS_WEIGHT
 from .lnutil import funding_output_script, LOCAL, REMOTE, HTLCOwner, make_closing_tx, make_outputs
 from .lnutil import ScriptHtlc, SENT, RECEIVED
-from .transaction import Transaction, TxOutput
+from .transaction import Transaction, TxOutput, construct_witness
 from .simple_config import SimpleConfig, FEERATE_FALLBACK_STATIC_FEE
 
 
@@ -789,13 +789,13 @@ def maybe_create_sweeptx_for_their_ctx_to_local(chan, ctx, per_commitment_secret
                                                 sweep_address) -> Optional[EncumberedTransaction]:
     assert isinstance(per_commitment_secret, bytes)
     per_commitment_point = ecc.ECPrivkey(per_commitment_secret).get_public_key_bytes(compressed=True)
-    revocation_privkey = lnutil.derive_blinded_privkey(chan.local_config.revocation_basepoint.privkey,
-                                                       per_commitment_secret)
+    revocation_privkey = derive_blinded_privkey(chan.local_config.revocation_basepoint.privkey,
+                                                per_commitment_secret)
     revocation_pubkey = ecc.ECPrivkey(revocation_privkey).get_public_key_bytes(compressed=True)
     to_self_delay = chan.local_config.to_self_delay
     delayed_pubkey = derive_pubkey(chan.remote_config.delayed_basepoint.pubkey,
                                    per_commitment_point)
-    witness_script = bh2u(lnutil.make_commitment_output_to_local_witness_script(
+    witness_script = bh2u(make_commitment_output_to_local_witness_script(
         revocation_pubkey, to_self_delay, delayed_pubkey))
     to_local_address = redeem_script_to_address('p2wsh', witness_script)
     for output_idx, o in enumerate(ctx.outputs()):
@@ -819,10 +819,10 @@ def maybe_create_sweeptx_for_our_ctx_to_local(chan, ctx, our_pcp: bytes,
     our_localdelayed_privkey = derive_privkey(delayed_bp_privkey.secret_scalar, our_pcp)
     our_localdelayed_privkey = ecc.ECPrivkey.from_secret_scalar(our_localdelayed_privkey)
     our_localdelayed_pubkey = our_localdelayed_privkey.get_public_key_bytes(compressed=True)
-    revocation_pubkey = lnutil.derive_blinded_pubkey(chan.remote_config.revocation_basepoint.pubkey,
-                                                     our_pcp)
+    revocation_pubkey = derive_blinded_pubkey(chan.remote_config.revocation_basepoint.pubkey,
+                                              our_pcp)
     to_self_delay = chan.remote_config.to_self_delay
-    witness_script = bh2u(lnutil.make_commitment_output_to_local_witness_script(
+    witness_script = bh2u(make_commitment_output_to_local_witness_script(
         revocation_pubkey, to_self_delay, our_localdelayed_pubkey))
     to_local_address = redeem_script_to_address('p2wsh', witness_script)
     for output_idx, o in enumerate(ctx.outputs()):
@@ -897,6 +897,6 @@ def create_sweeptx_ctx_to_local(address, ctx, output_idx: int, witness_script: s
     sweep_outputs = [TxOutput(TYPE_ADDRESS, address, val - fee)]
     sweep_tx = Transaction.from_io(sweep_inputs, sweep_outputs, version=2)
     sig = sweep_tx.sign_txin(0, privkey)
-    witness = transaction.construct_witness([sig, int(is_revocation), witness_script])
+    witness = construct_witness([sig, int(is_revocation), witness_script])
     sweep_tx.inputs()[0]['witness'] = witness
     return sweep_tx
